@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from io import BytesIO
 from typing import Any
 from textwrap import dedent
@@ -238,6 +239,9 @@ ANALYSIS_SCHEMA = {
     "additionalProperties": False,
 }
 
+MAX_CHUNK_CHARS = 12000
+CHUNK_OVERLAP_CHARS = 800
+
 
 def inject_styles() -> None:
     st.markdown(
@@ -471,6 +475,7 @@ def inject_styles() -> None:
     )
 
 
+@st.cache_data(show_spinner=False)
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     reader = PdfReader(BytesIO(file_bytes))
     pages = [page.extract_text() or "" for page in reader.pages]
@@ -491,6 +496,62 @@ def load_uploaded_text(uploaded_file: Any) -> str:
         return file_bytes.decode("utf-8")
     except UnicodeDecodeError:
         return file_bytes.decode("latin-1", errors="ignore")
+
+
+@st.cache_data(show_spinner=False)
+def preprocess_record_text(record_text: str) -> str:
+    cleaned_lines: list[str] = []
+    seen_recent: list[str] = []
+
+    for raw_line in record_text.splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip()
+        if not line:
+            continue
+        if re.fullmatch(r"(page|pg)\s*\d+(\s*of\s*\d+)?", line.lower()):
+            continue
+        if re.fullmatch(r"\d+\s*of\s*\d+", line.lower()):
+            continue
+        if line.lower().startswith(("confidential", "fax cover", "printed on", "scanned by")):
+            continue
+        if seen_recent and line == seen_recent[-1]:
+            continue
+        cleaned_lines.append(line)
+        seen_recent.append(line)
+        if len(seen_recent) > 25:
+            seen_recent.pop(0)
+
+    normalized_text = "\n".join(cleaned_lines)
+    normalized_text = re.sub(r"\n{3,}", "\n\n", normalized_text)
+    return normalized_text.strip()
+
+
+@st.cache_data(show_spinner=False)
+def split_record_into_chunks(record_text: str, max_chars: int = MAX_CHUNK_CHARS, overlap_chars: int = CHUNK_OVERLAP_CHARS) -> list[str]:
+    if len(record_text) <= max_chars:
+        return [record_text]
+
+    paragraphs = [paragraph.strip() for paragraph in record_text.split("\n\n") if paragraph.strip()]
+    chunks: list[str] = []
+    current = ""
+
+    for paragraph in paragraphs:
+        candidate = f"{current}\n\n{paragraph}".strip() if current else paragraph
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+            overlap = current[-overlap_chars:].strip()
+            current = f"{overlap}\n\n{paragraph}".strip() if overlap else paragraph
+        else:
+            chunks.append(paragraph[:max_chars])
+            current = paragraph[max_chars - overlap_chars :].strip()
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 def get_risk_badge(level: str) -> str:
@@ -550,16 +611,10 @@ def risk_meter(score: int) -> str:
     )
 
 
-def analyze_medical_record(record_text: str) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Missing OPENAI_API_KEY environment variable.")
-
-    client = OpenAI(api_key=api_key)
-
-    instructions = (
+def final_analysis_instructions() -> str:
+    return (
         "You are a healthcare risk review assistant for CareGap AI. Analyze only the information "
-        "contained in the provided patient record and return JSON only.\n\n"
+        "contained in the provided patient record summaries and return JSON only.\n\n"
         "Your output must map cleanly to these four sections:\n"
         "Timeline: a chronological list of the most important medical events.\n"
         "Risks: clinically meaningful risks, missed care, or delays in care.\n"
@@ -577,10 +632,54 @@ def analyze_medical_record(record_text: str) -> dict[str, Any]:
         "- Use these exact score bands: 1 to 33 = Low, 34 to 66 = Medium, 67 to 100 = High."
     )
 
+
+def analyze_chunk(client: OpenAI, chunk_text: str, chunk_index: int, total_chunks: int) -> dict[str, Any]:
+    instructions = (
+        "You are a healthcare risk review assistant for CareGap AI. Analyze only the information "
+        "contained in this chunk of a patient record and return JSON only.\n\n"
+        "This is part of a larger chart. Focus on extracting the most clinically meaningful events, risks, "
+        "care delays, and recommendations visible in this chunk. Be concise, professional, healthcare-relevant, "
+        "and avoid repetition."
+    )
+
     response = client.responses.create(
         model="gpt-5.2",
         reasoning={"effort": "medium"},
         instructions=instructions,
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": (
+                            f"Record chunk {chunk_index} of {total_chunks}.\n"
+                            "Return structured JSON with concise content for Timeline, Risks, Risk Level, "
+                            "Risk Score, and Recommendations.\n\n"
+                            f"{chunk_text}"
+                        ),
+                    }
+                ],
+            }
+        ],
+        text={
+            "format": {
+                "type": "json_schema",
+                "name": "caregap_chunk_analysis",
+                "strict": True,
+                "schema": ANALYSIS_SCHEMA,
+            }
+        },
+    )
+
+    return json.loads(response.output_text)
+
+
+def analyze_structured_record(client: OpenAI, record_text: str) -> dict[str, Any]:
+    response = client.responses.create(
+        model="gpt-5.2",
+        reasoning={"effort": "medium"},
+        instructions=final_analysis_instructions(),
         input=[
             {
                 "role": "user",
@@ -608,6 +707,32 @@ def analyze_medical_record(record_text: str) -> dict[str, Any]:
     )
 
     return json.loads(response.output_text)
+
+
+def synthesize_chunk_analyses(client: OpenAI, chunk_analyses: list[dict[str, Any]]) -> dict[str, Any]:
+    return analyze_structured_record(
+        client,
+        "Synthesize these chunk-level patient record analyses into one final healthcare dashboard output.\n\n"
+        + json.dumps(chunk_analyses),
+    )
+
+
+def analyze_medical_record(record_text: str) -> dict[str, Any]:
+    if not os.getenv("OPENAI_API_KEY"):
+        raise RuntimeError("Missing OPENAI_API_KEY environment variable.")
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    cleaned_text = preprocess_record_text(record_text)
+    chunks = split_record_into_chunks(cleaned_text)
+
+    if len(chunks) == 1:
+        return analyze_structured_record(client, chunks[0])
+
+    chunk_analyses = [
+        analyze_chunk(client, chunk_text, index, len(chunks))
+        for index, chunk_text in enumerate(chunks, start=1)
+    ]
+    return synthesize_chunk_analyses(client, chunk_analyses)
 
 
 def load_demo_case(record_text: str) -> dict[str, Any] | None:
@@ -647,7 +772,9 @@ def render_list(items: list[str], empty_message: str) -> None:
     )
 
 
-def build_export_summary(result: dict[str, Any]) -> str:
+@st.cache_data(show_spinner=False)
+def build_export_summary(result_json: str) -> str:
+    result = json.loads(result_json)
     timeline_lines = [
         f"- {item.get('date', 'Unknown date')}: {item.get('event', 'Event')} - {item.get('details', '')}"
         for item in result.get("timeline", [])
@@ -684,7 +811,9 @@ def build_export_summary(result: dict[str, Any]) -> str:
     ).strip()
 
 
-def build_timeline_csv(result: dict[str, Any]) -> str:
+@st.cache_data(show_spinner=False)
+def build_timeline_csv(result_json: str) -> str:
+    result = json.loads(result_json)
     rows = ["date,event,details"]
     for item in result.get("timeline", []):
         date = str(item.get("date", "")).replace('"', '""')
@@ -844,10 +973,11 @@ def main() -> None:
         render_kpi_card("Action Items", str(len(recommendation_items)), "Recommended next steps surfaced by AI")
 
     export_col_1, export_col_2 = st.columns(2)
+    export_payload = json.dumps(result, sort_keys=True)
     with export_col_1:
         st.download_button(
             "Download Summary (.txt)",
-            data=build_export_summary(result),
+            data=build_export_summary(export_payload),
             file_name="caregap_ai_summary.txt",
             mime="text/plain",
             use_container_width=True,
@@ -855,7 +985,7 @@ def main() -> None:
     with export_col_2:
         st.download_button(
             "Download Timeline (.csv)",
-            data=build_timeline_csv(result),
+            data=build_timeline_csv(export_payload),
             file_name="caregap_ai_timeline.csv",
             mime="text/csv",
             use_container_width=True,
