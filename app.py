@@ -276,6 +276,37 @@ def inject_styles() -> None:
                 box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
                 margin-bottom: 1.1rem;
             }
+            .about-card {
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(148, 163, 184, 0.18);
+                border-radius: 18px;
+                padding: 1.15rem 1.25rem;
+                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
+                margin-bottom: 1.1rem;
+            }
+            .use-case-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 0.8rem;
+                margin-top: 1rem;
+            }
+            .use-case-item {
+                background: rgba(15, 118, 110, 0.06);
+                border: 1px solid rgba(15, 118, 110, 0.12);
+                border-radius: 14px;
+                padding: 0.85rem 0.95rem;
+            }
+            .use-case-title {
+                color: #0f172a;
+                font-size: 0.95rem;
+                font-weight: 700;
+                margin-bottom: 0.2rem;
+            }
+            .use-case-copy {
+                color: #475569;
+                font-size: 0.88rem;
+                line-height: 1.45;
+            }
             .section-card {
                 background: rgba(255, 255, 255, 0.88);
                 border: 1px solid rgba(148, 163, 184, 0.18);
@@ -679,6 +710,45 @@ def main() -> None:
         <div class="hero">
             <h1>CareGap AI</h1>
             <p>AI-powered medical record review for timeline reconstruction, risk detection, and next-step care guidance.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="about-card">
+            """
+        + section_header("H", "Why CareGap AI Matters")
+        + """
+            <p class="muted">
+                CareGap AI helps turn long, fragmented medical records into a clear, chronological view of what happened,
+                where follow-up may have been missed, and which patients may need more urgent attention. In healthcare,
+                delays in labs, referrals, medications, or specialist follow-up can contribute to preventable complications,
+                higher costs, and poorer outcomes.
+            </p>
+            <p class="muted" style="margin-bottom: 0;">
+                By surfacing likely care gaps quickly, this tool can support care management teams, quality improvement work,
+                utilization review, and clinical operations that need faster chart review and better prioritization.
+            </p>
+            <div class="use-case-grid">
+                <div class="use-case-item">
+                    <div class="use-case-title">Care Management</div>
+                    <div class="use-case-copy">Highlight missed follow-ups, overdue labs, and patients who may need outreach.</div>
+                </div>
+                <div class="use-case-item">
+                    <div class="use-case-title">Discharge Review</div>
+                    <div class="use-case-copy">Track whether recommended post-discharge visits, medications, and specialty referrals happened.</div>
+                </div>
+                <div class="use-case-item">
+                    <div class="use-case-title">Risk Stratification</div>
+                    <div class="use-case-copy">Support prioritization by combining chart events, care delays, and severity into a clear risk view.</div>
+                </div>
+                <div class="use-case-item">
+                    <div class="use-case-title">Quality Improvement</div>
+                    <div class="use-case-copy">Surface recurring documentation and follow-up patterns that may point to workflow gaps.</div>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
