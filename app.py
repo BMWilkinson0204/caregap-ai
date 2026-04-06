@@ -900,14 +900,10 @@ def main() -> None:
         type=["pdf", "txt"],
         help="Upload a PDF or plain text medical record.",
     )
-
-    pasted_text = st.text_area(
-        "Or paste patient medical record text",
-        value=st.session_state.record_text,
-        height=240,
-        placeholder="Paste clinical notes, discharge summaries, referral records, or other patient history here...",
+    st.info(
+        "Demo patients are available for use today. Direct record upload and paste-based analysis can be "
+        "enabled for healthcare facilities during implementation and onboarding."
     )
-    st.session_state.record_text = pasted_text
 
     analyze_clicked = st.button("Analyze Record", type="primary", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
@@ -918,10 +914,11 @@ def main() -> None:
 
     if analyze_clicked:
         uploaded_text = load_uploaded_text(uploaded_file)
-        combined_text = "\n\n".join(part.strip() for part in [uploaded_text, pasted_text] if part and part.strip())
+        current_demo_text = st.session_state.record_text.strip()
+        combined_text = uploaded_text.strip() if uploaded_text.strip() else current_demo_text
 
         if not combined_text:
-            st.error("Please paste a medical record or upload a PDF/text file before running the analysis.")
+            st.error("Please choose a demo patient or upload a PDF/text file before running the analysis.")
         else:
             try:
                 with st.spinner("Analyzing medical record with OpenAI..."):
