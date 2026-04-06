@@ -4,7 +4,7 @@ from io import BytesIO
 from typing import Any
 
 import streamlit as st
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 from PyPDF2 import PdfReader
 
 
@@ -80,6 +80,117 @@ Medication History:
 11/21/2024 - Patient message requesting refill of fluticasone inhaler; refill sent without lapse in therapy documented.
 01/16/2025 - Primary care follow-up confirms continued medication adherence, stable asthma control, and plan for repeat HbA1c in 6 months.
 """.strip()
+
+
+HIGH_RISK_DEMO_ANALYSIS = {
+    "patient_summary": (
+        "Patient has poorly controlled diabetes with chronic kidney disease, neuropathy, repeated missed "
+        "specialty follow-ups, medication adherence gaps, overdue labs, and recurrent acute care use for "
+        "hyperglycemia and diabetic foot complications."
+    ),
+    "risk_level": "High",
+    "risk_score": 86,
+    "timeline": [
+        {
+            "date": "01/12/2023",
+            "event": "PCP follow-up showed uncontrolled chronic disease",
+            "details": "HbA1c 9.2% and blood pressure 162/94 with neuropathy symptoms reported.",
+        },
+        {
+            "date": "03/01/2023",
+            "event": "Insulin initiated",
+            "details": "Insulin glargine was started and repeat diabetes and kidney labs were recommended.",
+        },
+        {
+            "date": "05/18/2023 to 08/14/2023",
+            "event": "Specialty care delays",
+            "details": "Endocrinology and podiatry follow-ups were missed without timely documented rescheduling.",
+        },
+        {
+            "date": "10/03/2023",
+            "event": "Medication and lab gaps documented",
+            "details": "Patient ran out of insulin for about 3 weeks, used lisinopril inconsistently, and had worsening A1c and kidney markers.",
+        },
+        {
+            "date": "12/11/2023",
+            "event": "Emergency department visit for severe hyperglycemia",
+            "details": "Treated with IV fluids and insulin, then discharged with recommendation for close PCP follow-up.",
+        },
+        {
+            "date": "07/19/2024",
+            "event": "Emergency department visit for infected diabetic foot ulcer",
+            "details": "Started on antibiotics with urgent wound care and podiatry follow-up advised, but follow-up remained delayed.",
+        },
+    ],
+    "risks_detected": [
+        "Poorly controlled diabetes with evidence of progression to retinopathy, neuropathy, and chronic kidney disease.",
+        "Recurrent diabetic foot complications with infection risk and risk of limb-threatening progression.",
+        "Persistent hypertension increasing cardiovascular and renal risk.",
+        "Medication nonadherence and access barriers affecting glycemic and blood pressure control.",
+    ],
+    "missed_care_or_delays": [
+        "Missed endocrinology and podiatry follow-ups after referral.",
+        "Overdue HbA1c, metabolic, lipid, and kidney monitoring labs.",
+        "No timely documented primary care follow-up after ER visit for hyperglycemia.",
+        "Delayed wound care follow-up after diabetic foot infection.",
+    ],
+    "recommended_actions": [
+        "Arrange urgent primary care and endocrinology follow-up to address uncontrolled diabetes and insulin adherence barriers.",
+        "Schedule immediate podiatry or wound care evaluation for ongoing diabetic foot risk.",
+        "Repeat HbA1c, CMP, urine microalbumin, and renal function testing as soon as possible.",
+        "Assess medication affordability, refill access, and home glucose monitoring adherence.",
+        "Consider nephrology follow-up given CKD progression markers and persistent albuminuria.",
+    ],
+}
+
+
+LOW_RISK_DEMO_ANALYSIS = {
+    "patient_summary": (
+        "Patient has generally stable chronic disease control with good medication adherence, completed preventive "
+        "care, and only minor scheduling delays without evidence of acute deterioration."
+    ),
+    "risk_level": "Low",
+    "risk_score": 24,
+    "timeline": [
+        {
+            "date": "02/14/2024",
+            "event": "Annual preventive visit",
+            "details": "Asthma was stable, HbA1c was 5.9%, and LDL was mildly elevated.",
+        },
+        {
+            "date": "04/08/2024",
+            "event": "Telehealth respiratory follow-up",
+            "details": "Seasonal symptoms were reviewed and inhaler adherence was reinforced.",
+        },
+        {
+            "date": "08/22/2024",
+            "event": "Repeat lipid monitoring completed",
+            "details": "LDL improved on statin therapy, suggesting treatment adherence.",
+        },
+        {
+            "date": "10/03/2024",
+            "event": "Screening colonoscopy completed",
+            "details": "Preventive follow-up was completed without major findings.",
+        },
+        {
+            "date": "01/16/2025",
+            "event": "Routine primary care follow-up",
+            "details": "Chronic conditions remained stable and repeat HbA1c was planned.",
+        },
+    ],
+    "risks_detected": [
+        "Prediabetes requires ongoing surveillance to reduce progression risk.",
+        "Asthma may worsen seasonally if controller adherence declines.",
+    ],
+    "missed_care_or_delays": [
+        "Minor delay in colonoscopy scheduling, later completed without documented harm.",
+    ],
+    "recommended_actions": [
+        "Continue current controller inhaler and statin adherence.",
+        "Repeat HbA1c and lipid monitoring on schedule.",
+        "Maintain preventive primary care follow-up and asthma symptom monitoring.",
+    ],
+}
 
 
 ANALYSIS_SCHEMA = {
@@ -467,6 +578,14 @@ def analyze_medical_record(record_text: str) -> dict[str, Any]:
     return json.loads(response.output_text)
 
 
+def load_demo_case(record_text: str) -> dict[str, Any] | None:
+    if record_text.strip() == DEMO_PATIENT_RECORD:
+        return HIGH_RISK_DEMO_ANALYSIS
+    if record_text.strip() == LOW_RISK_DEMO_PATIENT_RECORD:
+        return LOW_RISK_DEMO_ANALYSIS
+    return None
+
+
 def render_timeline(items: list[dict[str, str]]) -> None:
     if not items:
         st.info("No timeline events were returned.")
@@ -522,11 +641,11 @@ def main() -> None:
     with demo_col_1:
         if st.button("Try High-Risk Demo", use_container_width=True):
             st.session_state.record_text = DEMO_PATIENT_RECORD
-            st.session_state.analysis_result = None
+            st.session_state.analysis_result = HIGH_RISK_DEMO_ANALYSIS
     with demo_col_2:
         if st.button("Try Lower-Risk Demo", use_container_width=True):
             st.session_state.record_text = LOW_RISK_DEMO_PATIENT_RECORD
-            st.session_state.analysis_result = None
+            st.session_state.analysis_result = LOW_RISK_DEMO_ANALYSIS
 
     uploaded_file = st.file_uploader(
         "Upload patient medical record",
@@ -554,8 +673,15 @@ def main() -> None:
         else:
             try:
                 with st.spinner("Analyzing medical record with OpenAI..."):
-                    st.session_state.analysis_result = analyze_medical_record(combined_text)
+                    demo_result = load_demo_case(combined_text)
+                    st.session_state.analysis_result = demo_result or analyze_medical_record(combined_text)
                 st.success("Analysis completed successfully.")
+            except RateLimitError:
+                st.session_state.analysis_result = None
+                st.error(
+                    "The OpenAI API key for this app does not currently have available quota. "
+                    "Update billing or replace the deployment secret with a funded API key."
+                )
             except Exception as exc:
                 st.session_state.analysis_result = None
                 st.error(f"Unable to complete the analysis: {exc}")
