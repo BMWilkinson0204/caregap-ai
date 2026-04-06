@@ -743,13 +743,6 @@ def load_demo_case(record_text: str) -> dict[str, Any] | None:
     return None
 
 
-def school_project_notice() -> None:
-    st.warning(
-        "School project demo mode: the built-in demo patients show the full CareGap AI experience without "
-        "using the OpenAI API. Live analysis for pasted or uploaded records requires a funded OpenAI API key."
-    )
-
-
 def render_timeline(items: list[dict[str, str]]) -> None:
     if not items:
         st.info("No timeline events were returned.")
@@ -901,7 +894,6 @@ def main() -> None:
             st.session_state.record_text = LOW_RISK_DEMO_PATIENT_RECORD
             st.session_state.analysis_result = LOW_RISK_DEMO_ANALYSIS
     st.caption("Demo patients use built-in sample analysis and do not consume OpenAI API quota.")
-    school_project_notice()
 
     uploaded_file = st.file_uploader(
         "Upload patient medical record",
