@@ -2,6 +2,7 @@ import json
 import os
 from io import BytesIO
 from typing import Any
+from textwrap import dedent
 
 import streamlit as st
 from openai import OpenAI, RateLimitError
@@ -615,6 +616,53 @@ def render_list(items: list[str], empty_message: str) -> None:
     )
 
 
+def build_export_summary(result: dict[str, Any]) -> str:
+    timeline_lines = [
+        f"- {item.get('date', 'Unknown date')}: {item.get('event', 'Event')} - {item.get('details', '')}"
+        for item in result.get("timeline", [])
+    ]
+    risk_lines = [f"- {item}" for item in result.get("risks_detected", [])]
+    delay_lines = [f"- {item}" for item in result.get("missed_care_or_delays", [])]
+    recommendation_lines = [f"- {item}" for item in result.get("recommended_actions", [])]
+
+    return dedent(
+        f"""
+        CareGap AI Analysis
+
+        Patient Summary:
+        {result.get("patient_summary", "")}
+
+        Risk Level:
+        {result.get("risk_level", "Medium")}
+
+        Risk Score:
+        {result.get("risk_score", 50)}/100
+
+        Timeline:
+        {chr(10).join(timeline_lines) if timeline_lines else "- No timeline events returned."}
+
+        Risks:
+        {chr(10).join(risk_lines) if risk_lines else "- No risks returned."}
+
+        Missed Care or Delays:
+        {chr(10).join(delay_lines) if delay_lines else "- No delays returned."}
+
+        Recommendations:
+        {chr(10).join(recommendation_lines) if recommendation_lines else "- No recommendations returned."}
+        """
+    ).strip()
+
+
+def build_timeline_csv(result: dict[str, Any]) -> str:
+    rows = ["date,event,details"]
+    for item in result.get("timeline", []):
+        date = str(item.get("date", "")).replace('"', '""')
+        event = str(item.get("event", "")).replace('"', '""')
+        details = str(item.get("details", "")).replace('"', '""')
+        rows.append(f'"{date}","{event}","{details}"')
+    return "\n".join(rows)
+
+
 def initialize_state() -> None:
     if "record_text" not in st.session_state:
         st.session_state.record_text = ""
@@ -646,6 +694,7 @@ def main() -> None:
         if st.button("Try Lower-Risk Demo", use_container_width=True):
             st.session_state.record_text = LOW_RISK_DEMO_PATIENT_RECORD
             st.session_state.analysis_result = LOW_RISK_DEMO_ANALYSIS
+    st.caption("Demo patients use built-in sample analysis and do not consume OpenAI API quota.")
 
     uploaded_file = st.file_uploader(
         "Upload patient medical record",
@@ -663,6 +712,10 @@ def main() -> None:
 
     analyze_clicked = st.button("Analyze Record", type="primary", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
+    st.info(
+        "CareGap AI is an AI-assisted review tool for care-gap screening and workflow support. "
+        "It does not replace clinician judgment or provide medical advice."
+    )
 
     if analyze_clicked:
         uploaded_text = load_uploaded_text(uploaded_file)
@@ -719,6 +772,24 @@ def main() -> None:
         render_kpi_card("Risk Score", str(normalized_score), "Severity score from 1 to 100")
     with kpi_col_3:
         render_kpi_card("Action Items", str(len(recommendation_items)), "Recommended next steps surfaced by AI")
+
+    export_col_1, export_col_2 = st.columns(2)
+    with export_col_1:
+        st.download_button(
+            "Download Summary (.txt)",
+            data=build_export_summary(result),
+            file_name="caregap_ai_summary.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+    with export_col_2:
+        st.download_button(
+            "Download Timeline (.csv)",
+            data=build_timeline_csv(result),
+            file_name="caregap_ai_timeline.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     left_col, right_col = st.columns(2, gap="large")
 
